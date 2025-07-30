@@ -46,6 +46,8 @@
 
 #include "board_common.h"
 
+#include "kendryte/pufs/pufs_hmac/pufs_hmac.h"
+
 #ifdef CONFIG_AUTO_DETECT_DDR_SIZE
     #include <asm/global_data.h>
     DECLARE_GLOBAL_DATA_PTR;
@@ -123,8 +125,8 @@ static int k230_boot_decomp_to_load_addr(image_header_t* pUh, ulong des_len, ulo
     ulong img_load_addr     = (ulong)image_get_load(pUh);
     int   img_compress_algo = image_get_comp(pUh);
 
-    printf("image: %s load to 0x%lx, compress=%d src=0x%lx len=0x%lx\n", image_get_name(pUh), img_load_addr,
-           img_compress_algo, data, *plen);
+    // printf("image: %s load to 0x%lx, compress=%d src=0x%lx len=0x%lx\n", image_get_name(pUh), img_load_addr,
+    //        img_compress_algo, data, *plen);
 
     if (IH_COMP_GZIP == img_compress_algo) {
         if (0x00 != (ret = gunzip((void*)img_load_addr, des_len, (void*)data, plen))) {
@@ -465,15 +467,36 @@ int k230_img_boot_sys_bin(firmware_head_s* fhBUff)
     return ret;
 }
 
+#define TIMER_CLK_FREQ  (27000000)
+
+static __inline __attribute__((__always_inline__)) uint64_t cpu_ticks_us(void)
+{
+    uint64_t time;
+    __asm__ __volatile__("rdtime %0" : "=r"(time));
+    return (time / (TIMER_CLK_FREQ / 1000000));
+}
+
 int k230_img_load_boot_sys(en_boot_sys_t sys)
 {
     int   ret           = 0;
     ulong img_load_addr = k230_get_encrypted_image_load_addr();
 
+    firmware_head_s *img = (firmware_head_s*)img_load_addr;
+    uint64_t load_start_time, load_time;
+    uint32_t image_size;
+
     if (sys == BOOT_SYS_AUTO) {
         ret = k230_img_load_boot_sys_auot_boot(sys);
     } else {
+        load_start_time = cpu_ticks_us();
+
         if (0x00 == (ret = k230_img_load_sys_from_dev(sys, img_load_addr))) {
+            load_time = cpu_ticks_us() - load_start_time;
+            image_size = img->length + sizeof(*img);
+
+            printf("load image %d bytes, time %d us, speed %d KB/s\n",
+                   image_size, (uint32_t)load_time, (int)(image_size / load_time * 1000));
+
             if (0x00 != (ret = k230_img_boot_sys_bin((firmware_head_s*)img_load_addr))) {
                 printf("Error, boot image failed.%d\n", ret);
             }
@@ -487,7 +510,7 @@ int k230_img_load_boot_sys(en_boot_sys_t sys)
 
 static int k230_boot_check_and_get_plain_data(firmware_head_s* pfh, ulong* pplain_addr)
 {
-    uint8_t sha256[SHA256_SUM_LEN];
+    pufs_dgst_st md;
 
     if (K230_IMAGE_MAGIC_NUM != pfh->magic) {
         printf("magic error 0x%08X != 0x%08X \n", K230_IMAGE_MAGIC_NUM, pfh->magic);
@@ -495,9 +518,12 @@ static int k230_boot_check_and_get_plain_data(firmware_head_s* pfh, ulong* pplai
     }
 
     if (NONE_SECURITY == pfh->crypto_type) {
-        sha256_csum_wd((const uint8_t*)(pfh + 1), pfh->length, sha256, CHUNKSZ_SHA256);
+        if(SUCCESS != cb_pufs_hash(&md, (const uint8_t*)(pfh + 1), pfh->length, SHA_256)) {
+            printf("sha256 error\n");
+            return 2;
+        }
 
-        if (memcmp(sha256, pfh->verify.none_sec.signature, SHA256_SUM_LEN)) {
+        if (memcmp(md.dgst, pfh->verify.none_sec.signature, SHA256_SUM_LEN)) {
             printf("sha256 error");
             return 2;
         }
@@ -505,19 +531,6 @@ static int k230_boot_check_and_get_plain_data(firmware_head_s* pfh, ulong* pplai
         if (pplain_addr) {
             *pplain_addr = (ulong)pfh + sizeof(*pfh);
         }
-
-#if 0
-        printf("calc sha256:");
-        for (int i = 0; i < SHA256_SUM_LEN; i++) {
-            printf("%02X", sha256[i]);
-        }
-        printf("\nfirmware sha256:");
-        for (int i = 0; i < SHA256_SUM_LEN; i++) {
-            printf("%02X", pfh->verify.none_sec.signature[i]);
-        }
-        printf("\n");
-#endif
-
         return 0;
     } else if ((CHINESE_SECURITY == pfh->crypto_type) || (INTERNATIONAL_SECURITY == pfh->crypto_type)
                || (GCM_ONLY == pfh->crypto_type)) {

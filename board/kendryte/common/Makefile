@@ -36,6 +36,7 @@ obj-y += k230_spl.o
 endif
 
 # Add pufs driver
+obj-y += puf_fw/pufs_internal.o
 obj-y += puf_fw/pufs_crypto.o
 obj-y += puf_fw/pufs_dma.o
 obj-y += puf_fw/pufs_ecc.o
