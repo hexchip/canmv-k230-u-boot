@@ -25,7 +25,7 @@
 /dts-v1/;
 #include <dt-bindings/pinctrl/k230-pinctrl.h>
 #define BANK_VOLTAGE_IO0_IO1  K230_MSC_1V8
-#define BANK_VOLTAGE_IO2_IO13 K230_MSC_3V3
+#define BANK_VOLTAGE_IO2_IO13 K230_MSC_1V8
 #define BANK_VOLTAGE_IO14_IO25  K230_MSC_3V3
 #define BANK_VOLTAGE_IO26_IO37  K230_MSC_3V3
 #define BANK_VOLTAGE_IO38_IO49  K230_MSC_3V3
@@ -69,10 +69,10 @@
 		(IO6) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO2_IO13 <<MSC | 0<<IE | 0<<OE | 0<<PU | 0<<PD | 0<<DS | 0<<ST )
 		(IO7) ( 2<<SEL | 0<<SL | BANK_VOLTAGE_IO2_IO13 <<MSC | 1<<IE | 1<<OE | 0<<PU | 0<<PD | 7<<DS | 1<<ST )
 		(IO8) ( 2<<SEL | 0<<SL | BANK_VOLTAGE_IO2_IO13 <<MSC | 1<<IE | 1<<OE | 0<<PU | 0<<PD | 7<<DS | 1<<ST )
-		(IO10) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO2_IO13 <<MSC | 1<<IE | 1<<OE | 0<<PU | 0<<PD | 7<<DS | 1<<ST )
+		(IO10) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO2_IO13 <<MSC | 0<<IE | 1<<OE | 0<<PU | 1<<PD | 4<<DS | 1<<ST )
 		(IO11) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO2_IO13 <<MSC | 0<<IE | 0<<OE | 0<<PU | 0<<PD | 0<<DS | 0<<ST )
 		(IO12) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO2_IO13 <<MSC | 0<<IE | 0<<OE | 0<<PU | 0<<PD | 0<<DS | 0<<ST )
-		(IO13) ( 1<<SEL | 0<<SL | BANK_VOLTAGE_IO2_IO13 <<MSC | 0<<IE | 1<<OE | 0<<PU | 0<<PD | 7<<DS | 0<<ST )
+		(IO13) ( 1<<SEL | 0<<SL | BANK_VOLTAGE_IO2_IO13 <<MSC | 0<<IE | 1<<OE | 0<<PU | 1<<PD | 4<<DS | 1<<ST )
 		(IO14) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO14_IO25 <<MSC | 0<<IE | 0<<OE | 0<<PU | 0<<PD | 0<<DS | 0<<ST )
 		(IO15) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO14_IO25 <<MSC | 0<<IE | 0<<OE | 0<<PU | 0<<PD | 0<<DS | 0<<ST )
 		(IO16) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO14_IO25 <<MSC | 0<<IE | 0<<OE | 0<<PU | 0<<PD | 0<<DS | 0<<ST )
