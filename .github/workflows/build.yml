@@ -16,19 +16,6 @@ jobs:
         shell: bash
 
     steps:
-      - name: Checkout code
-        uses: actions/checkout@v4
-        with:
-          path: uboot
-          fetch-depth: 1
-
-      - name: Get Git revision and set as environment variable
-        id: get_revision
-        run: |
-          cd ${{ github.workspace }}/uboot
-          revision=$(git describe --long --tag --dirty --always)
-          echo "REVISION=$revision" >> $GITHUB_ENV
-
       - name: Setup SSH
         run: |
           git config --global user.name kendryte747
@@ -41,93 +28,111 @@ jobs:
         run: |
           sudo apt update
           sudo apt install -y build-essential bison flex gcc libncurses5-dev \
-            libssl-dev pkg-config python3 python3-pip python-is-python3 python3-venv
+            libssl-dev pkg-config python3 python3-pip python-is-python3 python3-venv curl git
           python3 -m venv ~/.canmv_venv
           source ~/.canmv_venv/bin/activate
           pip3 install pycryptodome gmssl jsonschema jinja2
+
+      - name: Install repo tool
+        run: |
+          mkdir -p ~/bin
+          curl -o ~/bin/repo https://storage.googleapis.com/git-repo-downloads/repo
+          chmod a+x ~/bin/repo
+          echo "$HOME/bin" >> $GITHUB_PATH
+
+      - name: Init repo
+        run: |
+          mkdir ${{ github.workspace }}/canmv_k230
+          cd ${{ github.workspace }}/canmv_k230
+          repo init -u https://github.com/canmv-k230/manifest \
+                    -b master \
+                    --repo-url=https://github.com/canmv-k230/git-repo.git \
+                    --repo-branch stable
+
+      - name: Sync repo
+        run: |
+          cd ${{ github.workspace }}/canmv_k230
+          repo sync -j$(nproc)
+
+      - name: Get Git revision and set as environment variable
+        id: get_revision
+        run: |
+          cd ${{ github.workspace }}/canmv_k230/src/uboot/uboot
+          revision=$(git describe --long --tag --dirty --always)
+          echo "REVISION=$revision" >> $GITHUB_ENV
 
       - name: Cache RISC-V Toolchain
         id: cache-toolchain
         uses: actions/cache@v4
         with:
-          path: ~/.kendryte/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.0/
+          path: ~/.kendryte/k230_toolchains/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.0/
           key: k230-toolchain-v2.6.0
 
       - name: Download toolchains
         if: steps.cache-toolchain.outputs.cache-hit != 'true'
         run: |
-          mkdir -p ~/.kendryte
+          mkdir -p ~/.kendryte/k230_toolchains
           wget -q https://github.com/kendryte/canmv_k230/releases/download/v1.1/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.0.tar.bz2 -O /tmp/toolchain.tar.bz2
-          tar -xjf /tmp/toolchain.tar.bz2 -C ~/.kendryte
-          ls -alth ~/.kendryte
+          tar -xjf /tmp/toolchain.tar.bz2 -C ~/.kendryte/k230_toolchains
+          ls -alth ~/.kendryte/k230_toolchains
 
       - name: Build Prebuilt u-boot
+        shell: bash
         run: |
-          cd ${{ github.workspace }}/uboot
+          cd ${{ github.workspace }}/canmv_k230
+          mkdir -p ~/artifacts
           source ~/.canmv_venv/bin/activate
-          export ARCH=riscv
-          export CROSS_COMPILE=$HOME/.kendryte/Xuantie-900-gcc-linux-5.10.4-glibc-x86_64-V2.6.0/bin/riscv64-unknown-linux-gnu-
+          export SKIP_TOOLCHAIN_CHECK=1
 
-          defconfigs=(
-            k230_aihardware_defconfig
-            k230_canmv_defconfig
-            k230_canmv_01studio_defconfig
-            k230_canmv_dongshanpi_defconfig
-            k230_canmv_rtt_evb_defconfig
-            k230_canmv_lckfb_defconfig
-            k230_canmv_v3p0_defconfig
-            k230_evb_defconfig
-            k230_evb_spinand_defconfig
-            k230_labplus_1956_defconfig
-            k230d_canmv_atk_dnk230d_defconfig
-            k230d_canmv_bpi_zero_defconfig
-            k230d_canmv_junroc_ai_cam_defconfig
-            k230d_labplus_ai_camera_defconfig
+          declare -A defconfig_to_board=(
+            [k230_rtos_aihardware_defconfig]="k230_aihardware"
+            [k230_canmv_v1p0p1_defconfig]="k230_canmv"
+            [k230_canmv_01studio_defconfig]="k230_canmv_01studio"
+            [k230_canmv_dongshanpi_defconfig]="k230_canmv_dongshanpi"
+            [k230_canmv_lckfb_defconfig]="k230_canmv_lckfb"
+            [k230_canmv_rtt_evb_defconfig]="k230_canmv_rtt_evb"
+            [k230_canmv_v3p0_defconfig]="k230_canmv_v3p0"
+            [k230_rtos_evb_defconfig]="k230_evb"
+            [k230_rtos_evb_spinand_defconfig]="k230_evb_spinand"
+            [k230_canmv_labplus_1956_defconfig]="k230_labplus_1956"
+            [k230d_canmv_atk_dnk230d_defconfig]="k230d_canmv_atk_dnk230d"
+            [k230d_canmv_bpi_zero_defconfig]="k230d_canmv_bpi_zero"
+            [k230d_canmv_junroc_ai_cam_defconfig]="k230d_canmv_junroc_ai_cam"
+            [k230d_canmv_labplus_ai_camera_defconfig]="k230d_labplus_ai_camera"
           )
 
-          for UBOOT_DEFCONFIG in "${defconfigs[@]}"; do
+          echo "Defconfigs: ${!defconfig_to_board[@]}"
+
+          for UBOOT_DEFCONFIG in "${!defconfig_to_board[@]}"; do
             echo "=============================="
             echo " Building U-Boot: ${UBOOT_DEFCONFIG}"
             echo "=============================="
 
-            base_name=${UBOOT_DEFCONFIG%_defconfig}
-
-            # Setup output directories
-            export SDK_UBOOT_BUILD_DIR=$HOME/build/${base_name}
-            mkdir -p ${SDK_UBOOT_BUILD_DIR}
+            base_name=${defconfig_to_board[$UBOOT_DEFCONFIG]}
             mkdir -p ~/artifacts/${base_name}
 
-            # Build
-            make ${UBOOT_DEFCONFIG} O=${SDK_UBOOT_BUILD_DIR} || exit $?
-            make -j$(nproc) -C ${SDK_UBOOT_BUILD_DIR} || exit $?
+            make ${UBOOT_DEFCONFIG} || exit $?
+            # disable prebuilt
+            sed -i 's/^CONFIG_UBOOT_USE_PREBUILT=y$/CONFIG_UBOOT_USE_PREBUILT=n/' ${{ github.workspace }}/canmv_k230/.config
+            make uboot || exit $?
 
             # Also copy artifacts to artifacts folder
-            cp ${SDK_UBOOT_BUILD_DIR}/u-boot.bin ~/artifacts/${base_name}/u-boot.bin || echo "u-boot.bin missing"
-            cp ${SDK_UBOOT_BUILD_DIR}/spl/u-boot-spl.bin ~/artifacts/${base_name}/u-boot-spl.bin || echo "u-boot-spl.bin missing"
+            cp ${{ github.workspace }}/canmv_k230/output/${UBOOT_DEFCONFIG}/uboot/u-boot.bin ~/artifacts/${base_name}/u-boot.bin || { echo "u-boot.bin missing"; exit $?; }
+            cp ${{ github.workspace }}/canmv_k230/output/${UBOOT_DEFCONFIG}/uboot/spl/u-boot-spl.bin ~/artifacts/${base_name}/u-boot-spl.bin || { echo "u-boot-spl.bin missing"; exit $?; }
+
+            # build fastboot spl
+            make uboot-clean || exit $?
+            echo "CONFIG_UBOOT_ENABLE_FAST_BOOT=y" >> ${{ github.workspace }}/canmv_k230/.config
+            echo "CONFIG_UBOOT_FAST_BOOT_RTSMART=y" >> ${{ github.workspace }}/canmv_k230/.config
+            # disable prebuilt
+            sed -i 's/^CONFIG_UBOOT_USE_PREBUILT=y$/CONFIG_UBOOT_USE_PREBUILT=n/' ${{ github.workspace }}/canmv_k230/.config
+
+            make uboot || exit $?
+
+            cp ${{ github.workspace }}/canmv_k230/output/${UBOOT_DEFCONFIG}/uboot/spl/u-boot-spl.bin ~/artifacts/${base_name}/u-boot-spl-fastboot.bin || { echo "u-boot-spl-fastboot missing"; exit $?; }
           done
 
-          # build fastboot uboot
-          rm -rf ~/build
-          cp .github/workflows/sdk_autoconf.h.fastboot board/kendryte/common/sdk_autoconf.h
-
-          for UBOOT_DEFCONFIG in "${defconfigs[@]}"; do
-            echo "=============================="
-            echo " Building U-Boot: ${UBOOT_DEFCONFIG}"
-            echo "=============================="
-
-            base_name=${UBOOT_DEFCONFIG%_defconfig}
-
-            # Setup output directories
-            export SDK_UBOOT_BUILD_DIR=$HOME/build/${base_name}
-            mkdir -p ${SDK_UBOOT_BUILD_DIR}
-            #mkdir -p ~/artifacts/${base_name}
-
-            # Build
-            make ${UBOOT_DEFCONFIG} O=${SDK_UBOOT_BUILD_DIR} || exit $?
-            make -j$(nproc) -C ${SDK_UBOOT_BUILD_DIR} || exit $?
-
-            cp ${SDK_UBOOT_BUILD_DIR}/spl/u-boot-spl.bin ~/artifacts/${base_name}/u-boot-spl-fastboot.bin || echo "u-boot-spl.bin missing"
-          done
+          tree ~/artifacts
 
       - uses: actions/upload-artifact@v4
         if: github.ref != 'refs/heads/dev'
@@ -137,26 +142,23 @@ jobs:
           if-no-files-found: error
           compression-level: 0
 
-      - name: Checkout RTOS SDK
-        uses: actions/checkout@v4
-        with:
-          repository: kendryte/k230_rtos_sdk
-          path: rtos_sdk
-          fetch-depth: 1
-
       - name: Install Prebuilt u-boot
+        if: github.ref != 'refs/heads/dev'
         run: |
           # Capture the U-Boot commit hash
-          cd ${{ github.workspace }}/uboot
+          cd ${{ github.workspace }}/canmv_k230/src/uboot/uboot
           UBOOT_COMMIT=$(git rev-parse HEAD)
 
-          # Install prebuilt artifacts into rtos_sdk/boards
+          # Install prebuilt artifacts into canmv_k230/boards
           python3 .github/workflows/install_uboot_artifacts.py \
             --source ~/artifacts \
-            --target ${{ github.workspace }}/rtos_sdk/boards
+            --target ${{ github.workspace }}/canmv_k230/boards
 
-          # Commit the installed files to RTOS SDK
-          cd ${{ github.workspace }}/rtos_sdk
+          # Commit the installed files to CanMV K230 repository
+          cd ${{ github.workspace }}/canmv_k230
+
+          # Ensure we are on the main branch
+          git checkout main
 
           # Set up Git identity
           git config user.name "github-actions[bot]"
@@ -164,10 +166,10 @@ jobs:
 
           git add boards
           git commit -m "Update prebuilt u-boot from https://github.com/canmv-k230/u-boot/commit/${UBOOT_COMMIT}"
+          git status
 
           # Push using token-authenticated ssh
-          git remote set-url origin git@github.com:kendryte/k230_rtos_sdk.git
-          git push origin HEAD
+          git push
 
       - name: Clean up SSH private key
         if: always()
