@@ -33,6 +33,8 @@
 #endif
 #endif
 
+#include "k230_gpio.h"
+
 // Fallback definition or other code
 #ifndef MYHEADER_EXISTS
 // Provide alternative definitions or inform about missing header

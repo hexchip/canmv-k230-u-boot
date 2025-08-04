@@ -72,6 +72,10 @@ extern "C" {
 #define I2C3_BASE_ADDR              (0x91408000U)
 #define I2C4_BASE_ADDR              (0x91409000U)
 
+/* GPIO */
+#define GPIO0_BASE_ADDR             (0x9140B000UL)
+#define GPIO1_BASE_ADDR             (0x9140C000UL)
+
 /* IOMUX */
 #define IOMUX_BASE_ADDR             (0x91105000U)
 
