@@ -169,7 +169,8 @@ jobs:
           git status
 
           # Push using token-authenticated ssh
-          git push
+          git remote set-url github git@github.com:kendryte/k230_rtos_sdk.git
+          git push github main
 
       - name: Clean up SSH private key
         if: always()
