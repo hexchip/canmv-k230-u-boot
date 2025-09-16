@@ -46,6 +46,7 @@
 };
 
 &mmc0 {
+	1-8-v;
 	status = "okay";
 };
 
