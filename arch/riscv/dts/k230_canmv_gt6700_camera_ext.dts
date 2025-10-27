@@ -131,8 +131,8 @@
 		(IO59) ( 2<<SEL | 0<<SL | BANK_VOLTAGE_IO50_IO61 <<MSC | 1<<IE | 1<<OE | 1<<PU | 0<<PD | 7<<DS | 1<<ST )
 		(IO60) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO50_IO61 <<MSC | 1<<IE | 1<<OE | 0<<PU | 0<<PD | 7<<DS | 1<<ST )
 		(IO61) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO50_IO61 <<MSC | 1<<IE | 1<<OE | 0<<PU | 0<<PD | 7<<DS | 1<<ST )
-		(IO62) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO62_IO63 <<MSC | 1<<IE | 1<<OE | 0<<PU | 0<<PD | 7<<DS | 1<<ST )
-		(IO63) ( 0<<SEL | 0<<SL | BANK_VOLTAGE_IO62_IO63 <<MSC | 1<<IE | 1<<OE | 0<<PU | 0<<PD | 7<<DS | 1<<ST )
+		(IO62) ( 1<<SEL | 0<<SL | BANK_VOLTAGE_IO62_IO63 <<MSC | 0<<IE | 1<<OE | 1<<PU | 0<<PD | 10<<DS | 0<<ST )
+		(IO63) ( 1<<SEL | 0<<SL | BANK_VOLTAGE_IO62_IO63 <<MSC | 0<<IE | 1<<OE | 1<<PU | 0<<PD | 10<<DS | 0<<ST )
 		>;
 };
 };
