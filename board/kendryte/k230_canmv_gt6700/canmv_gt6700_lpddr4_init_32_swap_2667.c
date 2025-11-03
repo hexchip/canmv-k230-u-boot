@@ -17982,7 +17982,7 @@ while((train_data&0x7) !=0x07) {
  reg_read (   DDR_REG_BASE +   0x000d0032*4 +0x02000000 ,  train_data  );
   switch(train_data)
   {
-#ifndef CONFIG_UBOOT_ENABLE_FAST_BOOT
+#ifndef CONFIG_FAST_BOOT_CONFIGURATION
   case 0x00000000: printf("%08X: PMU Major Msg: End of initialization                                         \n",train_data);break;
   case 0x00000001: printf("%08X: PMU Major Msg: End of fine write leveling                                    \n",train_data);break;
   case 0x00000002: printf("%08X: PMU Major Msg: End of read enable training                                   \n",train_data);break;

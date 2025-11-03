@@ -28,7 +28,7 @@ obj-y += board_common.o
 
 ifndef CONFIG_KBURN
 obj-y += k230_boot.o
-obj-y += cmd_k230_boot.o
+obj-y += k230_atag.o
 obj-y += k230_gpio.o
 endif
 

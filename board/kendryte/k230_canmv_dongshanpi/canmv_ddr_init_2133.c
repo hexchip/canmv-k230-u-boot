@@ -17804,6 +17804,7 @@ while((train_data&0x7) !=0x07){
  reg_read (   DDR_REG_BASE +   0x000d0032*4 +0x02000000 ,  train_data  );
   switch(train_data)
   {
+#ifndef CONFIG_FAST_BOOT_CONFIGURATION
   case 0x00000000: printf("%08X: PMU Major Msg: End of initialization                                         \n",train_data);break;
   case 0x00000001: printf("%08X: PMU Major Msg: End of fine write leveling                                    \n",train_data);break;
   case 0x00000002: printf("%08X: PMU Major Msg: End of read enable training                                   \n",train_data);break;
@@ -17820,6 +17821,9 @@ while((train_data&0x7) !=0x07){
   case 0x0000000d: printf("%08X: PMU Major Msg: End of CA training                                            \n",train_data);break;
   case 0x000000fd: printf("%08X: PMU Major Msg: End of MPR read delay center optimization                     \n",train_data);break;
   case 0x000000fe: printf("%08X: PMU Major Msg: End of Write leveling coarse delay                            \n",train_data);break;
+#else
+  case 0x00000000 ... 0x000000fe: break;
+#endif
   case 0x000000ff: while(1) {printf("%08X: PMU Major Msg: FATAL ERROR.  \n",train_data); mdelay(100);}  break;
   default:         printf("%08X: PMU Major Msg: Un-recognized message... !                                    \n",train_data);break;
   }

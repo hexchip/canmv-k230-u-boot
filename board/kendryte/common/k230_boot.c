@@ -44,7 +44,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
-#include "board_common.h"
+#include "k230_atag.h"
 
 #include "kendryte/pufs/pufs_hmac/pufs_hmac.h"
 
@@ -59,63 +59,46 @@
     #define CONFIG_MEM_TOTAL_SIZE (128 * 1024 * 1024)
 #endif
 
-static int k230_boot_check_and_get_plain_data(firmware_head_s* pfh, ulong* pplain_addr);
+#include "board_common.h"
 
-struct k230_ddr_size_tag_st {
-    u32 flage;
-    u32 shash;
-    u32 resver;
-    u32 ddr_size;
+/* TOC (Table of Contents) 定义 */
+#define K230_TOC_OFFSET        0xe0000
+#define K230_TOC_SECTOR        (K230_TOC_OFFSET / 512)
+#define K230_TOC_MAX_ENTRIES   10
+#define K230_TOC_ENTRY_SIZE    64
+
+#define K230_BOOT_CORE_NUM_SHIFT    (0x1)
+#define K230_BOOT_CORE_NUM_MASK     (0x3 << K230_BOOT_CORE_NUM_SHIFT) 
+
+struct k230_toc_entry {
+    char name[32];
+    uint64_t offset;
+    uint64_t size;
+    uint8_t load;
+    uint8_t boot;
+    uint8_t pading_1[2];
+    uint32_t load_addr;
+    uint8_t pading_2[4];
+} __attribute__((aligned(64)));
+
+struct k230_toc {
+	uint32_t entry_count;
+	struct k230_toc_entry entries[K230_TOC_MAX_ENTRIES];
 };
 
-static uint32_t shash_len(const char* s, int len)
-{
-    uint32_t v = 5381;
-    int      i = 0;
-
-    for (i = 0; i < len; i++) {
-        v = (v << 5) + v + s[i];
-    }
-    return v;
-}
-
-void k230_boot_write_ddr_size_for_rtsmart(u64 ddr_size)
-{
-    struct k230_ddr_size_tag_st size_tag;
-
-    size_tag.flage    = 0x5a5a5a5a;
-    size_tag.shash    = 0;
-    size_tag.resver   = 0;
-    size_tag.ddr_size = ddr_size;
-    size_tag.shash    = shash_len((const unsigned char*)&size_tag, sizeof(size_tag));
-
-    memcpy(CONFIG_RTSMART_OPENSIB_MEMORY_SIZE - sizeof(size_tag), &size_tag, sizeof(size_tag));
-    flush_cache(CONFIG_RTSMART_OPENSIB_MEMORY_SIZE - sizeof(size_tag), sizeof(size_tag));
-}
-
-static int k230_boot_reset_big_hard_and_run(ulong core_run_addr)
-{
-    printf("Jump to big hart\n");
-
-    k230_boot_write_ddr_size_for_rtsmart(gd->ram_size);
-
-    writel(core_run_addr, (void*)0x91102104ULL);
-    writel(0x10001000, (void*)0x9110100cULL);
-    writel(0x10001, (void*)0x9110100cULL);
-    writel(0x10000, (void*)0x9110100cULL);
-
-    return 0;
-}
+static struct k230_toc toc;
+static struct blk_desc *pblk_desc;
+static uint64_t rtapp_load_addr, rtapp_size;
 
 unsigned long k230_get_encrypted_image_load_addr(void)
 {
-    unsigned long addr = CONFIG_MEM_BASE_ADDR + CONFIG_MEM_TOTAL_SIZE - (CONFIG_MEM_TOTAL_SIZE / 3);
+    unsigned long addr = CONFIG_MEM_BASE_ADDR + CONFIG_MEM_TOTAL_SIZE - ((CONFIG_MEM_TOTAL_SIZE / 3) * 2);
     return addr & ~(4096-1);
 }
 
-unsigned long k230_get_encrypted_image_decrypt_addr(void)
+unsigned long k230_get_rttapp_load_addr(void)
 {
-    unsigned long addr = CONFIG_MEM_BASE_ADDR + CONFIG_MEM_TOTAL_SIZE - ((CONFIG_MEM_TOTAL_SIZE / 3) * 2);
+    unsigned long addr = CONFIG_MEM_BASE_ADDR + CONFIG_MEM_TOTAL_SIZE - (CONFIG_MEM_TOTAL_SIZE / 3);
     return addr & ~(4096-1);
 }
 
@@ -141,369 +124,6 @@ static int k230_boot_decomp_to_load_addr(image_header_t* pUh, ulong des_len, ulo
     }
 
     flush_cache(img_load_addr, *plen);
-
-    return ret;
-}
-
-static int k230_boot_rtt_uimage(image_header_t* pUh)
-{
-    int   ret  = 0;
-    ulong len  = image_get_size(pUh);
-    ulong data = image_get_data(pUh);
-
-    image_multi_getimg(pUh, 0, &data, &len);
-
-    if (0x00 == (ret = k230_boot_decomp_to_load_addr(pUh, 0x6000000, data, &len))) {
-        k230_boot_reset_big_hard_and_run(image_get_load(pUh));
-        while (1) {
-            asm volatile("wfi");
-        }
-    }
-
-    printf("Boot RT-Smart failed. %d\n", ret);
-
-    return ret;
-}
-
-static int k230_boot_uboot_uimage(image_header_t* pUh)
-{
-    void (*uboot)(ulong hart, void* dtb);
-
-    int   ret  = 0;
-    ulong len  = image_get_data_size(pUh);
-    ulong data = image_get_data(pUh);
-
-    if (0x00 == (ret = k230_boot_decomp_to_load_addr(pUh, 0x6000000, data, &len))) {
-        icache_disable();
-        dcache_disable();
-
-        asm volatile(".long 0x0170000b\n" ::: "memory");
-        uboot = (void (*)(ulong, void*))(ulong)image_get_load(pUh);
-        uboot(0, 0);
-    }
-
-    return ret;
-}
-
-#if defined(CONFIG_MMC)
-__weak ulong get_blk_start_by_boot_firmre_type(en_boot_sys_t sys)
-{
-    ulong blk_s = IMG_PART_NOT_EXIT;
-
-    switch (sys) {
-    case BOOT_SYS_RTT:
-        blk_s = RTT_SYS_IN_IMG_OFF_SEC;
-        break;
-    case BOOT_SYS_UBOOT:
-        blk_s = UBOOT_SYS_IN_IMG_OFF_SEC;
-        break;
-    default:
-        break;
-    }
-
-    return blk_s;
-}
-
-static int k230_load_sys_from_mmc_or_sd(en_boot_sys_t sys, ulong buff)
-{
-    int   ret       = 0;
-    ulong data_sect = 0;
-
-    struct mmc*             mmc       = NULL;
-    static struct blk_desc* pblk_desc = NULL;
-
-    firmware_head_s* pfh   = (firmware_head_s*)buff;
-    ulong            blk_s = get_blk_start_by_boot_firmre_type(sys);
-
-    if (IMG_PART_NOT_EXIT == blk_s) {
-        return IMG_PART_NOT_EXIT;
-    }
-
-    if (NULL == pblk_desc) {
-        if (mmc_init_device(g_boot_medium - BOOT_MEDIUM_SDIO0)) {
-            return 1;
-        }
-
-        mmc = find_mmc_device(g_boot_medium - BOOT_MEDIUM_SDIO0);
-
-        if (NULL == mmc) {
-            return 2;
-        }
-
-        if (mmc_init(mmc)) {
-            return 3;
-        }
-
-        pblk_desc = mmc_get_blk_desc(mmc);
-        if (NULL == pblk_desc) {
-            return 3;
-        }
-    }
-
-    ret = blk_dread(pblk_desc, blk_s, HD_BLK_NUM, (char*)buff);
-    if (ret != HD_BLK_NUM) {
-        return 4;
-    }
-
-    if (pfh->magic != K230_IMAGE_MAGIC_NUM) {
-        printf("pfh->magic 0x%x != 0x%x blk=0x%lx buff=0x%lx  ", pfh->magic, K230_IMAGE_MAGIC_NUM, blk_s, buff);
-        return 5;
-    }
-
-    data_sect = DIV_ROUND_UP(pfh->length + sizeof(*pfh), BLKSZ) - HD_BLK_NUM;
-
-    ret = blk_dread(pblk_desc, blk_s + HD_BLK_NUM, data_sect, (char*)buff + HD_BLK_NUM * BLKSZ);
-
-    if (ret != data_sect) {
-        return 6;
-    }
-
-    return 0;
-}
-#endif // CONFIG_MMC
-
-#if defined(CONFIG_MTD_SPI_NAND)
-
-#define SPINAND_NAME "spi-nand0"
-
-__weak ulong get_nand_start_by_boot_firmre_type(en_boot_sys_t sys)
-{
-    ulong blk_s = IMG_PART_NOT_EXIT;
-    switch (sys) {
-    case BOOT_SYS_RTT:
-        blk_s = RTT_SYS_IN_SPI_NAND_OFF;
-        break;
-    case BOOT_SYS_UBOOT:
-        blk_s = UBOOT_SYS_IN_SPI_NAND_OFF;
-        break;
-    default:
-        break;
-    }
-    return blk_s;
-}
-
-static struct mtd_info* get_mtd_by_name(const char* name)
-{
-    struct mtd_info* mtd;
-
-    mtd_probe_devices();
-
-    mtd = get_mtd_device_nm(name);
-    if (IS_ERR_OR_NULL(mtd)) {
-        printf("MTD device %s not found, ret %ld\n", name, PTR_ERR(mtd));
-    }
-
-    return mtd;
-}
-
-static inline bool mtd_is_aligned_with_block_size(struct mtd_info* mtd, u64 size)
-{
-    return !do_div(size, mtd->erasesize);
-}
-
-static int k230_load_sys_from_spi_nand(en_boot_sys_t sys, ulong buff)
-{
-    int ret = 0;
-
-    u_char*          buf           = (u_char*)buff;
-    firmware_head_s* pfh           = (firmware_head_s*)buff;
-    size_t           len           = sizeof(*pfh);
-    size_t           blocksize     = 0;
-    size_t           amount_loaded = 0;
-    size_t           end           = 0;
-    ulong            off           = 0;
-
-    static struct mtd_info* mtd;
-    struct mtd_oob_ops      io_op = {};
-
-    if (IMG_PART_NOT_EXIT == off) {
-        return IMG_PART_NOT_EXIT;
-    }
-
-    mtd = get_mtd_by_name(SPINAND_NAME);
-    if (IS_ERR_OR_NULL(mtd)) {
-        printf("k230_load_sys_from_spi_nand error\n");
-        return 1;
-    }
-    blocksize = mtd->erasesize;
-
-    off = get_nand_start_by_boot_firmre_type(sys);
-    end = off + len;
-
-    io_op.mode   = MTD_OPS_AUTO_OOB;
-    io_op.len    = mtd->writesize;
-    io_op.ooblen = 0;
-    io_op.oobbuf = NULL;
-
-    amount_loaded = 0;
-    while (off < end) {
-        if (mtd_is_aligned_with_block_size(mtd, off) && mtd_block_isbad(mtd, off)) {
-            off += blocksize;
-        } else {
-            io_op.datbuf = &buf[amount_loaded];
-            if (mtd_read_oob(mtd, off, &io_op)) {
-                printf("read firmware head error\n");
-                ret = 2;
-                goto out_put_mtd;
-            }
-
-            off += io_op.retlen;
-            amount_loaded += io_op.retlen;
-        }
-    }
-
-    if (K230_IMAGE_MAGIC_NUM != pfh->magic) {
-        printf("pfh->magic 0x%x != 0x%x off=0x%lx buff=0x%lx ", pfh->magic, K230_IMAGE_MAGIC_NUM, off, buff);
-        ret = 5;
-        goto out_put_mtd;
-    }
-
-    ret = 6;
-    if (pfh->length > (mtd->writesize - sizeof(*pfh))) {
-        end = off + pfh->length - (mtd->writesize - sizeof(*pfh));
-        while (off < end) {
-            if (mtd_is_aligned_with_block_size(mtd, off) && mtd_block_isbad(mtd, off)) {
-                off += blocksize;
-            } else {
-                io_op.datbuf = &buf[amount_loaded];
-                if (mtd_read_oob(mtd, off, &io_op)) {
-                    printf("read firmware error\n");
-                    goto out_put_mtd;
-                }
-
-                off += io_op.retlen;
-                amount_loaded += io_op.retlen;
-            }
-        }
-    }
-
-#if 0
-    printf("firmware header:\n");
-    for (size_t i = 0; i < sizeof(*pfh); i++) {
-        printf("%02x ", buf[i]);
-
-        if (15 == (i % 16)) {
-            printf("\n");
-        }
-    }
-    printf("\n");
-#endif
-
-    ret = 0;
-
-out_put_mtd:
-    put_mtd_device(mtd);
-
-    return ret;
-}
-#endif
-
-static int k230_img_load_sys_from_dev(en_boot_sys_t sys, ulong buff)
-{
-    int ret = 0;
-
-#if defined(CONFIG_MMC)
-    if ((BOOT_MEDIUM_SDIO0 == g_boot_medium) || (BOOT_MEDIUM_SDIO1 == g_boot_medium)) {
-        ret = k230_load_sys_from_mmc_or_sd(sys, buff);
-    } else
-#endif // CONFIG_MMC
-
-#if defined(CONFIG_MTD_SPI_NAND)
-        if (g_boot_medium == BOOT_MEDIUM_NANDFLASH) {
-        ret = k230_load_sys_from_spi_nand(sys, buff);
-    } else
-#endif // CONFIG_MTD_SPI_NAND
-
-    {
-        ret = -1;
-        printf("Error, unsupport media type %d\n", g_boot_medium);
-    }
-
-    return ret;
-}
-
-static int k230_img_load_boot_sys_auot_boot(en_boot_sys_t sys)
-{
-    int ret = 0;
-
-    if (0x00 != (ret = k230_img_load_boot_sys(BOOT_SYS_RTT))) {
-        printf("Error, Autoboot RT-Smart failed. %d\n", ret);
-    }
-
-    return ret;
-}
-
-int k230_img_boot_sys_bin(firmware_head_s* fhBUff)
-{
-    int ret = 0;
-
-    image_header_t* pUh        = NULL;
-    const char*     image_name = NULL;
-    ulong           plain_addr = 0;
-
-    ret = k230_boot_check_and_get_plain_data((firmware_head_s*)fhBUff, &plain_addr);
-    if (ret) {
-        printf("decrypt image failed.");
-        return ret;
-    }
-
-    pUh = (image_header_t*)(plain_addr + 4);
-    if (!image_check_magic(pUh)) {
-        printf("bad magic \n");
-        return -3;
-    }
-
-    image_name = image_get_name(pUh);
-
-    if (0x00 == strcmp(image_name, "rtt")) {
-        ret = k230_boot_rtt_uimage(pUh);
-    } else if (0x00 == strcmp(image_name, "uboot")) {
-        ret = k230_boot_uboot_uimage(pUh);
-    } else {
-        printf("Error, Unsupport image type %s\n", image_name);
-        return -4;
-    }
-
-    return ret;
-}
-
-#define TIMER_CLK_FREQ  (27000000)
-
-static __inline __attribute__((__always_inline__)) uint64_t cpu_ticks_us(void)
-{
-    uint64_t time;
-    __asm__ __volatile__("rdtime %0" : "=r"(time));
-    return (time / (TIMER_CLK_FREQ / 1000000));
-}
-
-int k230_img_load_boot_sys(en_boot_sys_t sys)
-{
-    int   ret           = 0;
-    ulong img_load_addr = k230_get_encrypted_image_load_addr();
-
-    firmware_head_s *img = (firmware_head_s*)img_load_addr;
-    uint64_t load_start_time, load_time;
-    uint32_t image_size;
-
-    if (sys == BOOT_SYS_AUTO) {
-        ret = k230_img_load_boot_sys_auot_boot(sys);
-    } else {
-        load_start_time = cpu_ticks_us();
-
-        if (0x00 == (ret = k230_img_load_sys_from_dev(sys, img_load_addr))) {
-            load_time = cpu_ticks_us() - load_start_time;
-            image_size = img->length + sizeof(*img);
-
-            printf("load image %d bytes, time %d us, speed %d KB/s\n",
-                   image_size, (uint32_t)load_time, (int)(image_size / load_time * 1000));
-
-            if (0x00 != (ret = k230_img_boot_sys_bin((firmware_head_s*)img_load_addr))) {
-                printf("Error, boot image failed.%d\n", ret);
-            }
-        } else {
-            printf("Error, load image failed.%d\n", ret);
-        }
-    }
 
     return ret;
 }
@@ -544,3 +164,540 @@ static int k230_boot_check_and_get_plain_data(firmware_head_s* pfh, ulong* pplai
     // never reach
     return -1;
 }
+
+
+#if defined(CONFIG_MTD_SPI_NAND)
+
+#define SPINAND_NAME "spi-nand0"
+
+__weak ulong get_nand_start_by_boot_firmre_type(en_boot_sys_t sys)
+{
+    ulong blk_s = IMG_PART_NOT_EXIT;
+    switch (sys) {
+    case BOOT_SYS_RTT:
+        blk_s = RTT_SYS_IN_SPI_NAND_OFF;
+        break;
+    case BOOT_SYS_UBOOT:
+        blk_s = UBOOT_SYS_IN_SPI_NAND_OFF;
+        break;
+    default:
+        break;
+    }
+    return blk_s;
+}
+
+static struct mtd_info* get_mtd_by_name(const char* name)
+{
+    struct mtd_info* mtd;
+
+    mtd_probe_devices();
+
+    mtd = get_mtd_device_nm(name);
+    if (IS_ERR_OR_NULL(mtd)) {
+        printf("MTD device %s not found, ret %ld\n", name, PTR_ERR(mtd));
+    }
+
+    return mtd;
+}
+
+static inline bool mtd_is_aligned_with_block_size(struct mtd_info* mtd, u64 size)
+{
+    return !do_div(size, mtd->erasesize);
+}
+
+#endif
+
+#if defined(CONFIG_MMC)
+static int k230_mmc_init(void)
+{
+    int ret = 0;
+
+    if (!pblk_desc) {
+        struct mmc *mmc = NULL;
+
+        if (mmc_init_device(g_boot_medium - BOOT_MEDIUM_SDIO0)) {
+            ret = -1;
+            goto out;
+        }
+
+        mmc = find_mmc_device(g_boot_medium - BOOT_MEDIUM_SDIO0);
+
+        if (NULL == mmc) {
+            ret = -2;
+            goto out;
+        }
+
+        if (mmc_init(mmc)) {
+            ret = -3;
+            goto out;
+        }
+
+        pblk_desc = mmc_get_blk_desc(mmc);
+        if (NULL == pblk_desc) {
+            ret = -4;
+            goto out;
+        }
+    }
+
+out:
+    return ret;
+}
+#endif
+
+static void *k230_read_toc(void)
+{
+    int ret = 0;
+    ulong blk_count;
+    void *toc_buf;
+
+    memset(&toc, 0, sizeof(toc));
+
+    if (K230_TOC_ENTRY_SIZE != sizeof(struct k230_toc_entry)) {
+        printf("%s: struct k230_toc_entry must aligned to 64B\n", __func__);
+        ret = -1;
+        goto out;
+    }
+    toc_buf = (void *)k230_get_encrypted_image_load_addr();
+
+#if defined(CONFIG_MMC)
+    if ((BOOT_MEDIUM_SDIO0 == g_boot_medium) || (BOOT_MEDIUM_SDIO1 == g_boot_medium)) {
+        ret = k230_mmc_init();
+        if (0 != ret) {
+            printf("%s: k230_mmc_init fail: %d\n", __func__, ret);
+            goto out;
+        }
+
+        blk_count = (K230_TOC_MAX_ENTRIES * K230_TOC_ENTRY_SIZE + 511) / 512;
+
+        if (blk_dread(pblk_desc, K230_TOC_SECTOR, blk_count, toc_buf) != blk_count) {
+            printf("%s: Error: Failed to read TOC from MMC\n", __func__);
+            ret = -1;
+            goto out;
+        }
+    } else
+#endif
+
+#if defined(CONFIG_MTD_SPI_NAND)
+    if (g_boot_medium == BOOT_MEDIUM_NANDFLASH) {
+        static struct mtd_info *mtd;
+        struct mtd_oob_ops io_op = {};
+        size_t len = K230_TOC_MAX_ENTRIES * K230_TOC_ENTRY_SIZE;
+        size_t blocksize = 0;
+        size_t amount_loaded = 0;
+        size_t end = 0;
+        ulong off = 0;
+        u_char* buf = (u_char*)toc_buf;
+
+        mtd = get_mtd_by_name(SPINAND_NAME);
+        if (IS_ERR_OR_NULL(mtd)) {
+            printf("k230_load_sys_from_spi_nand error\n");
+            ret = -1;
+            goto out;
+
+        }
+        blocksize = mtd->erasesize;
+        off = K230_TOC_OFFSET;
+        end = off + len;
+
+        io_op.mode   = MTD_OPS_AUTO_OOB;
+        io_op.len    = mtd->writesize;
+        io_op.ooblen = 0;
+        io_op.oobbuf = NULL;
+
+        amount_loaded = 0;
+        while (off < end) {
+            if (mtd_is_aligned_with_block_size(mtd, off) && mtd_block_isbad(mtd, off)) {
+                off += blocksize;
+            } else {
+                io_op.datbuf = &buf[amount_loaded];
+                if (mtd_read_oob(mtd, off, &io_op)) {
+                    printf("%s: read firmware head error\n", __func__);
+                    ret = -1;
+                    put_mtd_device(mtd);
+                    goto out;
+                }
+
+                off += io_op.retlen;
+                amount_loaded += io_op.retlen;
+            }
+        }
+    } else
+#endif
+    {
+        ret = -1;
+        printf("%s: Error, unsupport media type %d\n", __func__, g_boot_medium);
+    }
+
+out:
+    if (0 != ret) {
+        return NULL;
+    }
+
+    return toc_buf;
+}
+
+#if 0
+static void dump_toc_info(void)
+{
+    printf("\n");
+    printf("=============== K230 TOC (Table of Contents) ===============\n");
+    printf("TOC Location: 0x%08x (sector %u)\n", K230_TOC_OFFSET, K230_TOC_SECTOR);
+    printf("Total Entries: %u\n", toc.entry_count);
+    printf("------------------------------------------------------------\n");
+    printf("%-16s %-12s %-12s %-6s %-6s\n",
+           "Name", "Offset", "Size", "Load", "Boot");
+    printf("------------------------------------------------------------\n");
+
+    for (int i = 0; i < toc.entry_count; i++) {
+        struct k230_toc_entry *entry = &toc.entries[i];
+
+        printf("%-16s  0x%08lx    0x%08lx %-6s   0x%x\n",
+               entry->name,
+               entry->offset,
+               entry->size,
+               entry->load ? "YES" : "NO",
+               entry->boot);
+    }
+
+    printf("============================================================\n");
+    printf("\n");
+}
+#endif
+
+static int k230_parse_toc(void *toc_buf)
+{
+    struct k230_toc_entry *src = (u8 *)toc_buf;
+
+	toc.entry_count = 0;
+	for (int i = 0; i < K230_TOC_MAX_ENTRIES; i++) {
+        struct k230_toc_entry *dst = &toc.entries[toc.entry_count];
+
+		if (src->name[0] == '\0') {
+			break;
+		}
+
+		memcpy(dst, src, sizeof(struct k230_toc_entry));
+
+		toc.entry_count++;
+        src ++;
+	}
+
+    //dump_toc_info();
+
+	return (toc.entry_count > 0) ? 0 : -7;
+}
+
+static uint get_gunzip_dest_length(const u8 *zipped_data, uint zipped_len)
+{
+    if (zipped_data == NULL || zipped_len < 4) {
+        return 0;
+    }
+    
+    uint original_len;
+    memcpy(&original_len, zipped_data + zipped_len - 4, 4);
+    
+    return original_len;
+}
+
+static uint _k230_load_img(uint64_t offset)
+{
+    int ret = 0;
+    ulong src_len, src_data, dst_len, plain_addr = 0;
+    image_header_t *pUh = NULL;
+    ulong buff = k230_get_encrypted_image_load_addr();
+    firmware_head_s *pfh = (firmware_head_s*)buff;
+
+#if defined(CONFIG_MMC)
+    if ((BOOT_MEDIUM_SDIO0 == g_boot_medium) || (BOOT_MEDIUM_SDIO1 == g_boot_medium)) {
+        ulong blk_s = offset / BLKSZ;
+        ulong data_sect = 0;
+
+        if (IMG_PART_NOT_EXIT == blk_s) {
+            printf("%s: invalid blk num\n", __func__);
+            ret = -1;
+            goto out;
+        }
+
+        if (NULL == pblk_desc) {
+            printf("%s: mmc is not init\n", __func__);
+            ret = -1;
+            goto out;
+        }
+
+        ret = blk_dread(pblk_desc, blk_s, HD_BLK_NUM, (char*)buff);
+        if (ret != HD_BLK_NUM) {
+            printf("%s: blk_dread fail: %d\n", __func__, ret);
+            ret = -1;
+            goto out;
+        }
+
+        if (pfh->magic != K230_IMAGE_MAGIC_NUM) {
+            printf("%s: pfh->magic 0x%x != 0x%x blk=0x%lx buff=0x%lx\n",
+                   __func__, pfh->magic, K230_IMAGE_MAGIC_NUM, blk_s, buff);
+            ret = -1;
+            goto out;
+        }
+
+        data_sect = DIV_ROUND_UP(pfh->length + sizeof(*pfh), BLKSZ) - HD_BLK_NUM;
+        ret = blk_dread(pblk_desc, blk_s + HD_BLK_NUM, data_sect, (char*)buff + HD_BLK_NUM * BLKSZ);
+        if (ret != data_sect) {
+            printf("%s: blk_dread failed: %d\n", __func__, ret);
+            ret = -1;
+            goto out;
+        }
+    } else
+#endif
+
+#if defined(CONFIG_MTD_SPI_NAND)
+    if (g_boot_medium == BOOT_MEDIUM_NANDFLASH) {
+        u_char*          buf           = (u_char*)buff;
+        size_t           blocksize     = 0;
+        size_t           amount_loaded = 0;
+        size_t           end           = 0;
+        ulong            off           = offset;
+
+        static struct mtd_info* mtd;
+        struct mtd_oob_ops      io_op = {};
+
+        if (IMG_PART_NOT_EXIT == off) {
+            return IMG_PART_NOT_EXIT;
+        }
+
+        mtd = get_mtd_by_name(SPINAND_NAME);
+        if (IS_ERR_OR_NULL(mtd)) {
+            printf("%s: get_mtd_by_name fail\n", __func__);
+            ret = -1;
+            goto out;
+        }
+
+        blocksize = mtd->erasesize;
+
+        end = off + sizeof(*pfh);
+
+        io_op.mode   = MTD_OPS_AUTO_OOB;
+        io_op.len    = mtd->writesize;
+        io_op.ooblen = 0;
+        io_op.oobbuf = NULL;
+
+        amount_loaded = 0;
+        while (off < end) {
+            if (mtd_is_aligned_with_block_size(mtd, off) && mtd_block_isbad(mtd, off)) {
+                off += blocksize;
+            } else {
+                io_op.datbuf = &buf[amount_loaded];
+                if (mtd_read_oob(mtd, off, &io_op)) {
+                    printf("%s: read firmware head error\n", __func__);
+                    put_mtd_device(mtd);
+                    ret = -1;
+                    goto out;
+                }
+
+                off += io_op.retlen;
+                amount_loaded += io_op.retlen;
+            }
+        }
+
+        if (K230_IMAGE_MAGIC_NUM != pfh->magic) {
+            printf("%s: pfh->magic 0x%x != 0x%x off=0x%lx buff=0x%lx ",
+                   __func__, pfh->magic, K230_IMAGE_MAGIC_NUM, off, buff);
+            put_mtd_device(mtd);
+            ret = -1;
+            goto out;
+        }
+
+        if (pfh->length > (mtd->writesize - sizeof(*pfh))) {
+            end = off + pfh->length - (mtd->writesize - sizeof(*pfh));
+            while (off < end) {
+                if (mtd_is_aligned_with_block_size(mtd, off) && mtd_block_isbad(mtd, off)) {
+                    off += blocksize;
+                } else {
+                    io_op.datbuf = &buf[amount_loaded];
+                    if (mtd_read_oob(mtd, off, &io_op)) {
+                        printf("%s: read firmware error\n", __func__);
+                        put_mtd_device(mtd);
+                        ret = -1;
+                        goto out;
+                    }
+
+                    off += io_op.retlen;
+                    amount_loaded += io_op.retlen;
+                }
+            }
+        }
+    } else
+#endif
+    {
+        ret = -1;
+        printf("%s: Error, unsupport media type %d\n", __func__, g_boot_medium);
+        goto out;
+    }
+
+    ret = k230_boot_check_and_get_plain_data((firmware_head_s*)buff, &plain_addr);
+    if (ret) {
+        printf("%s: decrypt image failed: %d\n", __func__, ret);
+        ret = -1;
+        goto out;
+    }
+
+    pUh = (image_header_t*)(plain_addr + 4);
+    if (!image_check_magic(pUh)) {
+        printf("%s: bad magic\n", __func__);
+        ret = -1;
+        goto out;
+    }
+
+    src_len  = image_get_size(pUh);
+    src_data = image_get_data(pUh);
+
+    if (IH_TYPE_MULTI == image_get_type(pUh)) {
+        image_multi_getimg(pUh, 0, &src_data, &src_len);
+    }
+
+    dst_len = get_gunzip_dest_length((u8 *)src_data, src_len);
+    if (0 == dst_len) {
+        dst_len = 0x6000000;
+    }
+
+    if (strncmp(image_get_name(pUh), "rtapp", 32) == 0) {
+        rtapp_size = dst_len;
+        rtapp_load_addr = k230_get_rttapp_load_addr();
+        image_set_load(pUh, rtapp_load_addr);
+    }
+
+    ret = k230_boot_decomp_to_load_addr(pUh, dst_len, src_data, &src_len);
+    if (ret) {
+        printf("%s: decomp_to_load_addr fail: %d\n", __func__, ret);
+        ret = -1;
+    }
+
+out:
+    if (0 != ret) {
+        return INVALID_LOAD_ADDR;
+    }
+
+    return image_get_load(pUh);
+}
+
+static int k230_load_img(void)
+{
+    uint l_addr;
+
+    for (int i = 0; i < toc.entry_count; i++) {
+        if (toc.entries[i].load) {
+            l_addr = _k230_load_img(toc.entries[i].offset);
+            if (l_addr == INVALID_LOAD_ADDR) {
+                printf("%s: load %s fail\n", __func__, toc.entries[i].name);
+                continue;
+            }
+            toc.entries[i].load_addr = l_addr;
+        }
+    }
+
+    return 0;
+}
+
+static void k230_boot_core(int core, ulong run_addr)
+{
+    switch (core) {
+    case 0: {
+        void (*run)(ulong hart, void* dtb);
+
+        icache_disable();
+        dcache_disable();
+
+        asm volatile(".long 0x0170000b\n" ::: "memory");
+        run = (void (*)(ulong, void*))run_addr;
+        run(0, 0);
+
+        break;
+    }
+    case 1: {
+
+        writel(run_addr, (void*)0x91102104ULL);
+        writel(0x10001000, (void*)0x9110100cULL);
+        writel(0x10001, (void*)0x9110100cULL);
+        writel(0x10000, (void*)0x9110100cULL);
+
+        break;
+    }
+    default:
+        printf("invalid core num boot to\n");
+        break;
+    }
+
+}
+
+static void k230_setup_user_tag(void)
+{
+    setup_start_tag();
+    setup_k230_ddr_size_tag(gd->ram_size);
+    setup_k230_rtapp_tag(rtapp_size, rtapp_load_addr);
+    setup_end_tag();
+}
+
+static void k230_boot_img(void)
+{
+    struct k230_toc_entry *core0_entry = NULL;
+    struct k230_toc_entry *core1_entry = NULL;
+
+    for (int i = 0; i < toc.entry_count; i++) {
+        if (toc.entries[i].boot) {
+            int core_num = (toc.entries[i].boot & K230_BOOT_CORE_NUM_MASK)
+                >> K230_BOOT_CORE_NUM_SHIFT;
+
+            if (core_num == 0) {
+                core0_entry = &toc.entries[i];
+                printf("Found Core 0 (Small Core): %s at 0x%lx\n",
+                       toc.entries[i].name, toc.entries[i].load_addr);
+            } else if (core_num == 1) {
+                core1_entry = &toc.entries[i];
+                printf("Found Core 1 (Big Core): %s at 0x%lx\n",
+                       toc.entries[i].name, toc.entries[i].load_addr);
+            }
+        }
+    }
+
+    if (core1_entry) {
+        k230_setup_user_tag();
+        k230_boot_core(1, core1_entry->load_addr);
+    }
+
+    if (core0_entry) {
+        k230_boot_core(0, core0_entry->load_addr);
+    }
+
+    while (1) {
+        asm volatile("wfi");
+    }
+}
+
+int k230_run_system(void)
+{
+    int ret = 0;
+    void *toc_buf;
+
+    toc_buf = k230_read_toc();
+    if (NULL == toc_buf) {
+        printf("%s: k230_read_toc fail\n", __func__);
+        ret = -1;
+        goto out;
+    }
+
+    ret = k230_parse_toc(toc_buf);
+    if (0 != ret) {
+        printf("%s: not toc exit: %d\n", __func__, ret);
+        goto out;
+    }
+
+    ret = k230_load_img();
+    if (0 != ret) {
+        printf("%s: k230_load_img fail: %d\n", __func__, ret);
+        goto out;
+    }
+
+    k230_boot_img();
+
+out:
+    return ret;
+}
+
