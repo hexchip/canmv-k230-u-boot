@@ -57,3 +57,25 @@ $(obj)/gen_lpddr4_32_swap_2667.lex.c: $(src)/lpddr4_32_swap_2667.c $(BOARD_COMMO
 obj-$(CONFIG_EVB_LPDDR4_3200) += gen_lpddr4_32_swap_3200.lex.o
 $(obj)/gen_lpddr4_32_swap_3200.lex.c: $(src)/lpddr4_32_swap_3200.c $(BOARD_COMMON_DIR)/ddr_2d.sh
 	$(Q)($(BOARD_COMMON_DIR)/ddr_2d.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d  0x542bd || exit 1)
+
+
+obj-$(CONFIG_EVB_V2_LPDDR4_2667) += gen_evb_lpddr4_v2_2667.lex.o
+
+$(obj)/gen_evb_lpddr4_v2_2667.lex.c: $(src)/../k230_canmv_01studio/canmv_01studio_lpddr4_init_32_swap_2667.c  $(BOARD_COMMON_DIR)/ddr.sh
+	$(Q)($(BOARD_COMMON_DIR)/ddr.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d || exit 1)
+
+obj-$(CONFIG_EVB_V2_LPDDR4_3200) += gen_evb_lpddr4_v2_3200.lex.o
+
+$(obj)/gen_evb_lpddr4_v2_3200.lex.c: $(src)/../k230_canmv_01studio/canmv_01studio_lpddr4_init_32_swap_3200.c  $(BOARD_COMMON_DIR)/ddr_2d.sh
+	$(Q)($(BOARD_COMMON_DIR)/ddr_2d.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d  0x542bd|| exit 1)
+
+
+obj-$(CONFIG_EVB_V2_LPDDR4_1066_WITHOUT_ODT) += gen_evb_lpddr4_v2_1066_nodt.lex.o
+
+$(obj)/gen_evb_lpddr4_v2_1066_nodt.lex.c: $(src)/../k230_canmv_01studio/canmv_01studio_lpddr4_init_32_swap_1066_without_odt.c  $(BOARD_COMMON_DIR)/ddr.sh
+	$(Q)($(BOARD_COMMON_DIR)/ddr.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d || exit 1)
+
+obj-$(CONFIG_EVB_V2_LPDDR4_1066) += gen_evb_lpddr4_v2_1066.lex.o
+
+$(obj)/gen_evb_lpddr4_v2_1066.lex.c: $(src)/../k230_canmv_01studio/canmv_01studio_lpddr4_init_32_swap_1066.c  $(BOARD_COMMON_DIR)/ddr.sh
+	$(Q)($(BOARD_COMMON_DIR)/ddr.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d || exit 1)

@@ -43,6 +43,26 @@ if TARGET_K230_EVB
 
         config EVB_K230D_SIP_LPDDR4_2667
             bool "k230d evb lpddr4(sip) 2667"
+
+        config EVB_V2_LPDDR4_2667
+            bool "k230 evb lpddr4 V2 2667"
+            help
+                "same as 01 ,lckfb"
+
+        config EVB_V2_LPDDR4_3200
+            bool "k230 evb lpddr4 V2 3200"
+            help
+                "same as 01 ,lckfb"
+
+        config EVB_V2_LPDDR4_1066_WITHOUT_ODT
+            bool "k230 evb lpddr4 V2 1066 without odt"
+            help
+                "same as 01 ,lckfb"
+
+        config EVB_V2_LPDDR4_1066
+            bool "k230 evb lpddr4 V2 1066 have odt"
+            help
+                "same as 01 ,lckfb"
     endchoice
 
 endif

@@ -159,6 +159,7 @@ static void dwcmshc_phy_delay_config(struct sdhci_host *host)
 	sdhci_writel(host, (sdhci_readl(host, SDHCI_VENDER_AT_CTRL_REG) | \
 	  BIT(16) | BIT(17) | BIT(19) | BIT(20)), SDHCI_VENDER_AT_CTRL_REG);
     sdhci_writel(host,0x0,SDHCI_VENDER_AT_STAT_REG);
+
 	return;
 }
 
@@ -200,7 +201,42 @@ static int dwcmshc_phy_init(struct sdhci_host *host)
 	return 0;
 }
 
+static void k230_sdhci_set_control_reg(struct sdhci_host *host)
+{
+	struct mmc *mmc = host->mmc;
+
+#if defined (CONFIG_MMC_SDHCI_SNPS)
+	sdhci_writeb(host, 0x0, 0x508);
+
+	#if defined (CONFIG_MMC_AUTO_DETECT_VOLTAGE)
+		if((void *)0x91580000 == host->ioaddr) {
+			uint32_t cfg_data = readl((const volatile void __iomem *)0x91213410UL);
+			uint32_t cfg = cpu_to_be32(cfg_data);
+
+			printf("mmc config 0x%08X\n", cfg);
+
+			if((0x01 == (cfg & 0x01)) && (0x02 == (cfg & 0x02))) {
+
+			} else {
+				u32 ctrl = sdhci_readw(host, SDHCI_HOST_CONTROL2);
+				ctrl |= SDHCI_CTRL_VDD_180;
+				sdhci_writew(host, ctrl, SDHCI_HOST_CONTROL2);
+			}
+		}
+	#else
+		if(dev_read_bool(mmc->dev, "1-8-v")) {
+			u32 ctrl = sdhci_readw(host, SDHCI_HOST_CONTROL2);
+			ctrl |= SDHCI_CTRL_VDD_180;
+			sdhci_writew(host, ctrl, SDHCI_HOST_CONTROL2);
+		}
+	#endif // CONFIG_MMC_AUTO_DETECT_VOLTAGE
+#endif // CONFIG_MMC_SDHCI_SNPS
+
+	sdhci_set_uhs_timing(host);
+}
+
 struct sdhci_ops k230_host_opt={
+	.set_control_reg = k230_sdhci_set_control_reg,
 	.deferred_probe = dwcmshc_phy_init,
 };
 

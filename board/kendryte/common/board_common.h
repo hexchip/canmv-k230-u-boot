@@ -109,9 +109,6 @@ typedef enum _en___boot_type {
 #define BLKSZ      512
 #define HD_BLK_NUM DIV_ROUND_UP(sizeof(firmware_head_s), BLKSZ)
 
-#define UBOOT_SYS_IN_IMG_OFF_SEC (2 * 1024 * 1024 / BLKSZ)
-#define RTT_SYS_IN_IMG_OFF_SEC   (10 * 1024 * 1024 / BLKSZ)
-
 #define UBOOT_SYS_IN_SPI_NOR_OFF 0x80000
 #define RTT_SYS_IN_SPI_NOR_OFF   CONFIG_SPI_NOR_RTTK_BASE
 
@@ -119,17 +116,16 @@ typedef enum _en___boot_type {
 #define RTT_SYS_IN_SPI_NAND_OFF   (5 * 1024 * 1024)
 
 #define IMG_PART_NOT_EXIT 0XFFFFFFFF
+#define INVALID_LOAD_ADDR 0xFFFFFFFF
 
 extern int g_boot_medium;
 
 unsigned long k230_get_encrypted_image_load_addr(void);
 unsigned long k230_get_encrypted_image_decrypt_addr(void);
 
-int k230_img_boot_sys_bin(firmware_head_s* fhBUff);
-int k230_img_load_boot_sys(en_boot_sys_t sys);
-
 void board_ddr_init(void);
 int  ddr_init_training(void);
+int k230_run_system(void);
 
 int kd_board_init(void);
 

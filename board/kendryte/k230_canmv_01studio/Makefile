@@ -38,7 +38,7 @@ obj-$(CONFIG_CANMV_01STUDIO_LPDDR4_3200) += gen_canmv_01studio_lpddr4_3200.lex.o
 $(obj)/gen_canmv_01studio_lpddr3_800.lex.c: $(src)/canmv_01studio_lpddr3_init_800.c   $(BOARD_COMMON_DIR)/ddr.sh
 	$(Q)($(BOARD_COMMON_DIR)/ddr.sh $< $@ 0x50000 0x53fff 0x54000 0x54359 || exit 1)
 
-$(obj)/gen_canmv_01studio_lpddr3_1600.lex.c: $(src)/canmv_01studio_lpddr3_init_1600.c   $(BOARD_COMMON_DIR)/ddr.sh	
+$(obj)/gen_canmv_01studio_lpddr3_1600.lex.c: $(src)/canmv_01studio_lpddr3_init_1600.c   $(BOARD_COMMON_DIR)/ddr.sh
 	$(Q)($(BOARD_COMMON_DIR)/ddr.sh $< $@ 0x50000 0x53fff 0x54000 0x54359 || exit 1)
 
 $(obj)/gen_canmv_01studio_lpddr3_2133.lex.c: $(src)/canmv_01studio_lpddr3_init_2133.c   $(BOARD_COMMON_DIR)/ddr.sh
@@ -49,3 +49,15 @@ $(obj)/gen_canmv_01studio_lpddr4_2667.lex.c: $(src)/canmv_01studio_lpddr4_init_3
 
 $(obj)/gen_canmv_01studio_lpddr4_3200.lex.c: $(src)/canmv_01studio_lpddr4_init_32_swap_3200.c   $(BOARD_COMMON_DIR)/ddr_2d.sh
 	$(Q)($(BOARD_COMMON_DIR)/ddr_2d.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d 0x542bd || exit 1)
+
+
+obj-$(CONFIG_CANMV_01STUDIO_LPDDR4_1066_NODT) += gen_01studio_lpddr4_1066_nodt.lex.o
+
+$(obj)/gen_01studio_lpddr4_1066_nodt.lex.c: $(src)/../k230_canmv_01studio/canmv_01studio_lpddr4_init_32_swap_1066_without_odt.c  $(BOARD_COMMON_DIR)/ddr.sh
+	$(Q)($(BOARD_COMMON_DIR)/ddr.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d || exit 1)
+
+
+obj-$(CONFIG_CANMV_01STUDIO_LPDDR4_1066) += gen_01studio_lpddr4_1066.lex.o
+
+$(obj)/gen_01studio_lpddr4_1066.lex.c: $(src)/../k230_canmv_01studio/canmv_01studio_lpddr4_init_32_swap_1066.c  $(BOARD_COMMON_DIR)/ddr.sh
+	$(Q)($(BOARD_COMMON_DIR)/ddr.sh $< $@ 0x50000 0x53fff 0x54000 0x5433d || exit 1)

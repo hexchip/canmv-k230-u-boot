@@ -26,8 +26,8 @@
 #include "k230_canmv_01studio_iomux.dtsi"
 
 / {
-	model = "kendryte k230 canmv 01studio sdcard";
-	compatible = "kendryte,k230_canmv_01studio_sdcard";
+	model = "kendryte k230 canmv 01studio emmc";
+	compatible = "kendryte,k230_canmv_01studio_emmc";
 
 	memory@0 {
 		device_type = "memory";
@@ -38,5 +38,6 @@
 };
 
 &mmc0 {
+	1-8-v;
 	status = "okay";
 };
